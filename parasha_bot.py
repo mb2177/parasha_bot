@@ -1,179 +1,104 @@
 import os
 import logging
-import json
-from datetime import time
-from zoneinfo import ZoneInfo
-from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update, BotCommand
-from telegram.ext import ApplicationBuilder, CommandHandler, CallbackQueryHandler, ContextTypes
-from openai import OpenAI
+from telegram import Update, InlineKeyboardMarkup, InlineKeyboardButton
+from telegram.ext import (ApplicationBuilder, CommandHandler, CallbackQueryHandler,
+                          ContextTypes, JobQueue)
+from apscheduler.schedulers.asyncio import AsyncIOScheduler
+from datetime import time, timedelta
+from dotenv import load_dotenv
 
-# ──────────────────────────────────────────────────────────────────────────────
-# Конфигурация: вставьте свои ключи (в кавычках)
-TELEGRAM_BOT_TOKEN = os.getenv('TELEGRAM_BOT_TOKEN')
-OPENAI_API_KEY     = os.getenv('OPENAI_API_KEY')
-LANG_FILE          = 'user_langs.json'
-# ──────────────────────────────────────────────────────────────────────────────
+load_dotenv()
 
-# Логирование
-logging.basicConfig(format='%(asctime)s - %(levelname)s - %(message)s', level=logging.INFO)
+# Logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
-# Инициализация OpenAI
-openai_client = OpenAI(api_key=OPENAI_API_KEY)
-# Память языковых настроек пользователей
-user_langs = {}
+# Set your bot token
+BOT_TOKEN = os.getenv("BOT_TOKEN")
 
-# Загрузка/сохранение настроек
+# Global dict to hold language per user
+user_languages = {}
 
-def load_user_langs():
-    global user_langs
-    try:
-        with open(LANG_FILE, 'r', encoding='utf-8') as f:
-            user_langs = json.load(f)
-    except FileNotFoundError:
-        user_langs = {}
+# Example messages for parasha
+WEEKLY_PARASHA_SHORT = {
+    'en': "🪶 Weekly Parshah (brief): This week's portion is 'Korach'.",
+    'he': "🪶 פרשת השבוע בקצרה: פרשת קורח.",
+    'ru': "🪶 Краткая глава недели: Парашат Корах."
+}
 
+WEEKLY_PARASHA_FULL = {
+    'en': "📜 Full Weekly Parshah: This week's Torah portion is 'Korach', describing the rebellion...",
+    'he': "📜 פרשת השבוע המלאה: בפרשת קורח מסופר על המרד...",
+    'ru': "📜 Полный текст главы недели: Парашат Корах рассказывает о восстании..."
+}
 
-def save_user_langs():
-    with open(LANG_FILE, 'w', encoding='utf-8') as f:
-        json.dump(user_langs, f, ensure_ascii=False, indent=2)
+# Language buttons with emojis
+LANG_BUTTONS = [
+    [InlineKeyboardButton("🇬🇧 English", callback_data="lang|en")],
+    [InlineKeyboardButton("🇮🇱 עברית", callback_data="lang|he")],
+    [InlineKeyboardButton("🇷🇺 Русский", callback_data="lang|ru")],
+]
+
+COMMANDS = [
+    ("start", "Start the bot and set language"),
+    ("language", "Change bot language"),
+    ("brief", "Weekly Parshah (brief)"),
+    ("full", "Weekly Parshah (full)")
+]
 
 # --- Handlers ---
+
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    keyboard = [
-        [InlineKeyboardButton('🇷🇺 Русский', callback_data='lang|ru')],
-        [InlineKeyboardButton('🇬🇧 English', callback_data='lang|en')],
-        [InlineKeyboardButton('🇮🇱 עברית', callback_data='lang|he')],
-    ]
+    user_id = update.effective_user.id
+    user_languages[user_id] = 'en'  # default to English
     await update.message.reply_text(
-        'Выберите язык / Choose your language / בחר שפה:',
-        reply_markup=InlineKeyboardMarkup(keyboard)
+        "Welcome! Choose your language:",
+        reply_markup=InlineKeyboardMarkup(LANG_BUTTONS)
     )
 
 async def lang_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
-    lang = query.data.split('|', 1)[1]
-    user_langs[str(query.from_user.id)] = lang
-    save_user_langs()
-    labels = {'ru': '🇷🇺 Русский', 'en': '🇬🇧 English', 'he': '🇮🇱 עברית'}
-    await query.edit_message_text(f'Язык установлен: {labels[lang]}')
+    user_id = query.from_user.id
+    lang = query.data.split('|')[1]
+    user_languages[user_id] = lang
+    await query.edit_message_text(f"✅ Language set to {lang.upper()}")
 
-async def brief_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    uid = str(update.effective_user.id)
-    lang = user_langs.get(uid, 'en')
-    summary = await generate_summary(lang)
-    await update.message.reply_text(f'📖 Кратко про главу / Briefly Parshah:\n{summary}')
+async def send_brief(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    lang = user_languages.get(update.effective_user.id, 'en')
+    await update.message.reply_text(WEEKLY_PARASHA_SHORT[lang])
 
-async def full_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    uid = str(update.effective_user.id)
-    lang = user_langs.get(uid, 'en')
-    full = await generate_full_text(lang)
-    for i in range(0, len(full), 4000):
-        await update.message.reply_text(full[i:i+4000])
-    if len(full) > 4000:
-        await update.message.reply_text('✅ Текст был длинным и разбит на несколько сообщений')
+async def send_full(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    lang = user_languages.get(update.effective_user.id, 'en')
+    await update.message.reply_text(WEEKLY_PARASHA_FULL[lang])
 
-# --- OpenAI generation ---
-async def generate_summary(lang: str) -> str:
-    sys_map = {
-        'ru': 'Ты эксперт по Торе, кратко перескажи текущую главу простым языком.',
-        'en': 'You are an expert on the Torah; give a simple summary of this week’s portion.',
-        'he': 'אתה מומחה לתורה; כתוב תקציר פשוט של הפרשה השבועית.'
-    }
-    prompt_map = {
-        'ru': 'Напиши простой краткий пересказ этой недельной главы Торы.',
-        'en': 'Write a simple summary of this week’s Torah portion.',
-        'he': 'כתוב תקציר קצר של הפרשה השבועית.'
-    }
-    resp = openai_client.chat.completions.create(
-        model='gpt-4o',
-        messages=[
-            {'role': 'system', 'content': sys_map[lang]},
-            {'role': 'user', 'content': prompt_map[lang]},
-        ],
-        temperature=0.7,
-    )
-    return resp.choices[0].message.content.strip()
+# --- Job Queue Broadcasts ---
 
-async def generate_full_text(lang: str) -> str:
-    text_map = {
-        'ru': 'Предоставь полный текст недельной главы Торы на русском языке.',
-        'en': 'Provide the full text of this week’s Torah portion in English.',
-        'he': 'כתוב את הטקסט המלא של הפרשה השבועית בעברית.'
-    }
-    resp = openai_client.chat.completions.create(
-        model='gpt-4o',
-        messages=[
-            {'role': 'system', 'content': text_map[lang]},
-            {'role': 'user', 'content': text_map[lang]},
-        ],
-        temperature=0.5,
-        max_tokens=4096,
-    )
-    return resp.choices[0].message.content.strip()
+async def scheduled_broadcast(context: ContextTypes.DEFAULT_TYPE):
+    for user_id, lang in user_languages.items():
+        try:
+            await context.bot.send_message(chat_id=user_id, text=WEEKLY_PARASHA_SHORT[lang])
+        except Exception as e:
+            logger.warning(f"Failed to send to {user_id}: {e}")
 
-# --- Scheduled broadcasts ---
-def schedule_jobs(job_queue):
-    tz = ZoneInfo('Asia/Dubai')
-    job_queue.run_daily(broadcast_summary, time=time(12, 20, tzinfo=tz), days=(0,))
-    job_queue.run_daily(broadcast_reflection, time=time(12, 20, tzinfo=tz), days=(2,))
-    job_queue.run_daily(broadcast_toast, time=time(12, 20, tzinfo=tz), days=(4,))
+# --- Application Entry ---
 
-async def broadcast_summary(context: ContextTypes.DEFAULT_TYPE):
-    for uid, lang in user_langs.items():
-        text = await generate_summary(lang)
-        await context.bot.send_message(chat_id=int(uid), text=f'📖 Briefly Parshah ({lang}):\n{text}')
+app = ApplicationBuilder().token(BOT_TOKEN).build()
 
-async def broadcast_reflection(context: ContextTypes.DEFAULT_TYPE):
-    prompts = {
-        'ru': 'Напиши несколько ключевых мыслей из текущей главы Торы.',
-        'en': 'List key reflection points from this week’s Torah portion.',
-        'he': 'רשום נקודות למחשבה מהפרשה השבועית.'
-    }
-    for uid, lang in user_langs.items():
-        resp = openai_client.chat.completions.create(
-            model='gpt-4o',
-            messages=[{'role':'system','content':prompts[lang]},{'role':'user','content':prompts[lang]}],
-            temperature=0.7,
-        )
-        text = resp.choices[0].message.content.strip()
-        await context.bot.send_message(chat_id=int(uid), text=f'💡 Reflection ({lang}):\n{text}')
+app.add_handler(CommandHandler("start", start))
+app.add_handler(CommandHandler("language", start))
+app.add_handler(CommandHandler("brief", send_brief))
+app.add_handler(CommandHandler("full", send_full))
+app.add_handler(CallbackQueryHandler(lang_callback, pattern=r"^lang\|"))
 
-async def broadcast_toast(context: ContextTypes.DEFAULT_TYPE):
-    prompts = {
-        'ru': 'Напиши теплый тост к шаббату по текущей главе Торы.',
-        'en': 'Create a warm Shabbat toast based on this week’s Torah portion.',
-        'he': 'כתוב ברכת שבת חמה על פי הפרשה השבועית.'
-    }
-    for uid, lang in user_langs.items():
-        resp = openai_client.chat.completions.create(
-            model='gpt-4o',
-            messages=[{'role':'system','content':prompts[lang]},{'role':'user','content':prompts[lang]}],
-            temperature=0.7,
-        )
-        text = resp.choices[0].message.content.strip()
-        await context.bot.send_message(chat_id=int(uid), text=f'🥂 Shabbat Toast ({lang}):\n{text}')
+# Set visible commands in Telegram UI
+app.bot.set_my_commands([CommandHandler(name, desc) for name, desc in COMMANDS])
 
-# --- Main ---
-def main():
-    load_user_langs()
-    app = ApplicationBuilder().token(TELEGRAM_BOT_TOKEN).post_init(
-        lambda a: a.bot.set_my_commands([
-            BotCommand('start','Start/restart bot'),
-            BotCommand('language','Change language'),
-            BotCommand('brief','Briefly Parshah'),
-            BotCommand('full','Full Parshah'),
-        ])
-    ).build()
+# Schedule the broadcast at 12:20 Dubai time daily
+scheduler = AsyncIOScheduler(timezone="Asia/Dubai")
+scheduler.add_job(lambda: scheduled_broadcast(app.bot), 'cron', hour=12, minute=20)
+scheduler.start()
 
-    app.add_handler(CommandHandler('start', start))
-    app.add_handler(CommandHandler('language', start))
-    app.add_handler(CommandHandler('brief', brief_handler))
-    app.add_handler(CommandHandler('full', full_handler))
-    app.add_handler(CallbackQueryHandler(lang_callback, pattern=r'^lang\|'))
-
-    schedule_jobs(app.job_queue)
-    app.run_polling()
-
+# --- Run the bot ---
 if __name__ == '__main__':
-    main()
+    app.run_polling()
