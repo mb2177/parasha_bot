@@ -17,9 +17,9 @@ except ImportError:
     pass
 
 # -----------------------------------------------------------------------------
-# Конфигурация: вставьте свои ключи (в кавычках или через переменные окружения)
-TELEGRAM_BOT_TOKEN = os.getenv('7959503859:AAGaokGubdGPHRSivp6n11R7gNwuywX7Q-M')
-OPENAI_API_KEY     = os.getenv('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')
+# Конфигурация: ключи API Telegram и OpenAI жестко прописаны, как вы просили
+TELEGRAM_BOT_TOKEN = '7959503859:AAGaokGubdGPHRSivp6n11R7gNwuywX7Q-M'
+OPENAI_API_KEY     = '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'
 USER_LANG_FILE     = 'user_langs.json'
 MESSAGE_LOG_FILE   = 'message_logs.json'
 # -----------------------------------------------------------------------------
@@ -31,11 +31,11 @@ logger = logging.getLogger(__name__)
 # Инициализация OpenAI
 openai_client = OpenAI(api_key=OPENAI_API_KEY)
 
-# Хранилища
+# Память пользователей и лог сообщений
 user_langs   = {}
 message_logs = {}
 
-# --- Вспомогательные функции для загрузки/сохранения данных ---
+# --- Функции загрузки/сохранения данных ---
 def load_user_langs():
     global user_langs
     try:
@@ -61,7 +61,6 @@ def save_message_logs():
         json.dump(message_logs, f, ensure_ascii=False, indent=2)
 
 def log_message(user_id: str, text: str, msg_type: str):
-    """Записать историю сообщений для пользователя."""
     entry = {
         'timestamp': datetime.now(ZoneInfo('Asia/Dubai')).isoformat(),
         'type': msg_type,
@@ -119,7 +118,7 @@ async def generate_summary(lang: str) -> str:
         model='gpt-4o',
         messages=[
             {'role': 'system', 'content': sys_map.get(lang, sys_map['en'])},
-            {'role': 'user', 'content': prompt_map.get(lang, prompt_map['en'])},
+            {'role': 'user', 'content': prompt_map.get(lang, prompt_map['en'])}
         ],
         temperature=0.7,
     )
@@ -135,7 +134,7 @@ async def generate_full_text(lang: str) -> str:
         model='gpt-4o',
         messages=[
             {'role': 'system', 'content': text_map.get(lang, text_map['en'])},
-            {'role': 'user', 'content': text_map.get(lang, text_map['en'])},
+            {'role': 'user', 'content': text_map.get(lang, text_map['en'])}
         ],
         temperature=0.5,
         max_tokens=4096,
@@ -144,11 +143,10 @@ async def generate_full_text(lang: str) -> str:
 
 # --- Обработчики команд и кнопок ---
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Обработчик /start и /language — выбор языка."""
     keyboard = [
         [InlineKeyboardButton(LANG_LABELS['ru'], callback_data='lang|ru')],
         [InlineKeyboardButton(LANG_LABELS['en'], callback_data='lang|en')],
-        [InlineKeyboardButton(LANG_LABELS['he'], callback_data='lang|he')],
+        [InlineKeyboardButton(LANG_LABELS['he'], callback_data='lang|he')]
     ]
     await update.message.reply_text(
         get_text('language_prompt', 'en'),
@@ -156,7 +154,6 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 async def lang_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Обработчик выбора языка."""
     query = update.callback_query
     await query.answer()
     lang = query.data.split('|', 1)[1]
@@ -164,26 +161,14 @@ async def lang_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_langs[user_id] = lang
     save_user_langs()
 
-    # Подтверждение языка
     await query.edit_message_text(get_text('language_set', lang, label=LANG_LABELS[lang]))
-
-    # Показать главное меню кнопок
-    menu_buttons = [
-        [KeyboardButton("📚 Кратко про главу"), KeyboardButton("📜 Полная глава")],
-        [KeyboardButton("/language")]
-    ]
-    await context.bot.send_message(
-        chat_id=query.from_user.id,
-        text=get_text('menu', lang),
-        reply_markup=ReplyKeyboardMarkup(menu_buttons, resize_keyboard=True)
-    )
+    menu_buttons = [[KeyboardButton("📚 Кратко про главу"), KeyboardButton("📜 Полная глава")],[KeyboardButton("/language")]]
+    await context.bot.send_message(chat_id=query.from_user.id, text=get_text('menu', lang), reply_markup=ReplyKeyboardMarkup(menu_buttons, resize_keyboard=True))
 
 async def brief_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_id = str(update.effective_user.id)
-    lang = user_langs.get(user_id, 'en')
+    user_id, lang = str(update.effective_user.id), user_langs.get(str(update.effective_user.id), 'en')
     try:
-        summary = await generate_summary(lang)
-        text = get_text('summary_prefix', lang) + summary
+        text = get_text('summary_prefix', lang) + (await generate_summary(lang))
         await update.message.reply_text(text)
         log_message(user_id, text, 'manual')
     except Exception as e:
@@ -191,64 +176,36 @@ async def brief_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(get_text('error', lang))
 
 async def full_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_id = str(update.effective_user.id)
-    lang = user_langs.get(user_id, 'en')
+    user_id, lang = str(update.effective_user.id), user_langs.get(str(update.effective_user.id), 'en')
     try:
         full = await generate_full_text(lang)
         prefix = get_text('full_prefix', lang)
-        chunks = [full[i:i+4000] for i in range(0, len(full), 4000)]
-        for idx, chunk in enumerate(chunks):
-            text = prefix + chunk if idx == 0 else chunk
-            await update.message.reply_text(text)
-        if len(chunks) > 1:
-            await update.message.reply_text('✅ Текст был длинным и разбит на несколько сообщений')
+        for i in range(0, len(full), 4000): await update.message.reply_text((prefix if i==0 else '') + full[i:i+4000])
+        if len(full) > 4000: await update.message.reply_text('✅ Текст был длинным и разбит')
         log_message(user_id, prefix + full, 'manual')
     except Exception as e:
         logger.error(f"Error in full_handler: {e}")
         await update.message.reply_text(get_text('error', lang))
 
 async def broadcast_summary(context: ContextTypes.DEFAULT_TYPE):
-    """Рассылка ежедневного краткого пересказа."""
-    for user_id, lang in user_langs.items():
+    for uid, lang in user_langs.items():
         try:
-            summary = await generate_summary(lang)
-            text = get_text('summary_prefix', lang) + summary
-            await context.bot.send_message(chat_id=int(user_id), text=text)
-            log_message(user_id, text, 'auto')
+            text = get_text('summary_prefix', lang) + (await generate_summary(lang))
+            await context.bot.send_message(chat_id=int(uid), text=text)
+            log_message(uid, text, 'auto')
         except Exception as e:
-            logger.error(f"Error broadcasting to {user_id}: {e}")
+            logger.error(f"Broadcast error for {uid}: {e}")
 
-def schedule_jobs(job_queue):
-    tz = ZoneInfo('Asia/Dubai')
-    # Ежедневно в 12:20 по времени Дубая
-    job_queue.run_daily(broadcast_summary, time=time(12, 20, tzinfo=tz))
+def schedule_jobs(job_queue): job_queue.run_daily(broadcast_summary, time=time(12,20, tzinfo=ZoneInfo('Asia/Dubai')))
 
 async def main():
-    load_user_langs()
-    load_message_logs()
-
-    app = ApplicationBuilder().token(TELEGRAM_BOT_TOKEN).post_init(
-        lambda a: a.bot.set_my_commands([
-            BotCommand('start', 'Start bot'),
-            BotCommand('language', 'Change language'),
-            BotCommand('brief', 'Briefly Parshah'),
-            BotCommand('full', 'Full Parshah'),
-        ])
-    ).build()
-
-    # Регистрация хендлеров
-    app.add_handler(CommandHandler('start', start))
-    app.add_handler(CommandHandler('language', start))
+    load_user_langs(); load_message_logs()
+    app = ApplicationBuilder().token(TELEGRAM_BOT_TOKEN).post_init(lambda a: a.bot.set_my_commands([BotCommand('start','Start'),BotCommand('language','Change language'),BotCommand('brief','Briefly'),BotCommand('full','Full')])).build()
+    app.add_handler(CommandHandler('start', start)); app.add_handler(CommandHandler('language', start))
     app.add_handler(CallbackQueryHandler(lang_callback, pattern=r'^lang\|'))
-    app.add_handler(CommandHandler('brief', brief_handler))
-    app.add_handler(CommandHandler('full', full_handler))
-    app.add_handler(MessageHandler(filters.TEXT("📚 Кратко про главу"), brief_handler))
-    app.add_handler(MessageHandler(filters.TEXT("📜 Полная глава"), full_handler))
-
+    app.add_handler(CommandHandler('brief', brief_handler)); app.add_handler(CommandHandler('full', full_handler))
+    app.add_handler(MessageHandler(filters.TEXT("📚 Кратко про главу"), brief_handler)); app.add_handler(MessageHandler(filters.TEXT("📜 Полная глава"), full_handler))
     schedule_jobs(app.job_queue)
-
-    # Запуск бота
     await app.run_polling()
 
-if __name__ == '__main__':
-    asyncio.run(main())
+if __name__ == '__main__': asyncio.run(main())
