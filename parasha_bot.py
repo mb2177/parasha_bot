@@ -18,8 +18,8 @@ except ImportError:
 
 # -----------------------------------------------------------------------------
 # Конфигурация: вставьте свои ключи (в кавычках или через переменные окружения)
-TELEGRAM_BOT_TOKEN = os.getenv('TELEGRAM_BOT_TOKEN')
-OPENAI_API_KEY     = os.getenv('OPENAI_API_KEY')
+TELEGRAM_BOT_TOKEN = os.getenv('7959503859:AAGaokGubdGPHRSivp6n11R7gNwuywX7Q-M')
+OPENAI_API_KEY     = os.getenv('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')
 USER_LANG_FILE     = 'user_langs.json'
 MESSAGE_LOG_FILE   = 'message_logs.json'
 # -----------------------------------------------------------------------------
