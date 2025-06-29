@@ -6,12 +6,12 @@ from dotenv import load_dotenv
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, CallbackQueryHandler, ContextTypes
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
-import openai
+from openai import AsyncOpenAI
 
 # Загрузка токенов из .env
 load_dotenv()
 TOKEN = os.getenv("BOT_TOKEN")
-openai.api_key = os.getenv("OPENAI_API_KEY")
+client = AsyncOpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
 # Доступные языки
 LANGS = {
@@ -23,14 +23,14 @@ LANGS = {
 # Промпты для GPT
 PROMPTS = {
     "summary": {
-        "ru": "Кратко перескажи недельную главу Торы на этой неделе. Просто, понятно и интересно.",
-        "en": "Briefly summarize this week's Torah portion in a simple, clear, and engaging way.",
-        "he": "סכם בקצרה את פרשת השבוע בצורה פשוטה וברורה."
+        "ru": "Кратко перескажи недельную главу Торы на этой неделе. Просто, понятно и интересно. Добавь название главы и внизу один мудрый комментарий от себя на русском.",
+        "en": "Briefly summarize this week's Torah portion. Make it simple, clear, and engaging. Include the portion name and a short reflection at the end.",
+        "he": "סכם בקצרה את פרשת השבוע. כתוב בצורה ברורה, מעניינת ונגישה. כלול את שם הפרשה ולמטה הערה קצרה."
     },
     "full": {
-        "ru": "Расскажи подробно, но понятно о недельной главе Торы этой недели.",
-        "en": "Tell the full story of this week's Torah portion in a clear and engaging way.",
-        "he": "ספר את סיפור הפרשה בצורה מלאה וברורה."
+        "ru": "Расскажи подробно и понятно о недельной главе Торы на этой неделе. Добавь название главы и в конце мудрый комментарий от себя на русском.",
+        "en": "Tell the full story of this week's Torah portion in a clear and engaging way. Include the portion name and a wise reflection at the end.",
+        "he": "ספר את סיפור הפרשה בצורה מלאה, מעניינת וברורה. כלול את שם הפרשה ולבסוף הוסף מחשבה חכמה."
     },
     "questions": {
         "ru": "Какие жизненные уроки можно извлечь из недельной главы Торы? Задай 1-2 вопроса, о которых стоит подумать.",
@@ -38,9 +38,9 @@ PROMPTS = {
         "he": "אילו מסרים אפשר ללמוד מהפרשה? שאל 1-2 שאלות שמעוררות מחשבה."
     },
     "toast": {
-        "ru": "Сделай короткий тост на Шаббат, связанный с темой недельной главы.",
-        "en": "Write a short Shabbat toast inspired by this week's Torah portion.",
-        "he": "כתוב לחיים קצר לשבת על פי פרשת השבוע."
+        "ru": "Сделай короткий, но мудрый и лёгкий для рассказа тост на Шаббат, связанный с темой недельной главы.",
+        "en": "Write a short but wise and light Shabbat toast inspired by this week's Torah portion.",
+        "he": "כתוב לחיים קצר, חכם וקליל לשבת על פי פרשת השבוע."
     }
 }
 
@@ -64,7 +64,6 @@ def get_lang(user_id):
 
 async def gpt_respond(prompt_text):
     try:
-        client = openai.AsyncOpenAI()
         response = await client.chat.completions.create(
             model="gpt-4",
             messages=[
@@ -137,8 +136,8 @@ async def main():
     await app.bot.set_my_commands([
         ("start", "Приветствие и выбор языка"),
         ("language", "Сменить язык"),
-        ("summary", "📚 Краткий пересказ главы"),
-        ("full", "📜 Полная версия главы")
+        ("summary", "📚 Глава кратко"),
+        ("full", "📜 Глава подробно")
     ])
 
     schedule_jobs(app)
