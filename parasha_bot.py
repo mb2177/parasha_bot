@@ -145,15 +145,26 @@ async def main():
 
 if __name__ == "__main__":
     import asyncio
-    import sys
+    import logging
+
     logging.basicConfig(level=logging.INFO)
-    try:
-        asyncio.run(main())
-    except RuntimeError as e:
-        if "event loop is already running" in str(e):
-            loop = asyncio.get_event_loop()
-            loop.create_task(main())
-            loop.run_forever()
-        else:
-            raise e
-            
+
+    app = Application.builder().token(TOKEN).build()
+
+    app.add_handler(CommandHandler("start", start))
+    app.add_handler(CommandHandler("language", language))
+    app.add_handler(CommandHandler("summary", summary))
+    app.add_handler(CommandHandler("full", full))
+    app.add_handler(CallbackQueryHandler(button))
+
+    app.bot.set_my_commands([
+        ("start", "Приветствие и выбор языка"),
+        ("language", "Сменить язык"),
+        ("summary", "📚 Кратко про главу"),
+        ("full", "📜 Полная глава")
+    ])
+
+    schedule_jobs(app)
+
+    # запускаем бот (без asyncio.run!)
+    app.run_polling()
