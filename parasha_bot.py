@@ -66,15 +66,14 @@ def get_lang(user_id):
 # GPT для openai==0.28.1
 async def gpt_respond(prompt_text):
     try:
-        loop = asyncio.get_event_loop()
-        response = await loop.run_in_executor(None, lambda: openai.ChatCompletion.create(
+        response = await openai.ChatCompletion.acreate(
             model="gpt-4",
             messages=[
                 {"role": "system", "content": GPT_SYSTEM_PROMPT},
                 {"role": "user", "content": prompt_text}
             ]
-        ))
-        return response.choices[0].message["content"].strip()
+        )
+        return response["choices"][0]["message"]["content"].strip()
     except Exception as e:
         return f"[Ошибка GPT: {e}]"
 
