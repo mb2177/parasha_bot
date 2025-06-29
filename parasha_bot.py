@@ -164,7 +164,8 @@ async def main():
     schedule_jobs(app)
     await app.run_polling()
 
- if __name__ == "__main__":
+if __name__ == "__main__":
+    import logging
     logging.basicConfig(level=logging.INFO)
 
     try:
@@ -172,6 +173,11 @@ async def main():
         asyncio.set_event_loop_policy(uvloop.EventLoopPolicy())
     except ImportError:
         pass
+
+    loop = asyncio.get_event_loop()
+    loop.create_task(main())
+    loop.run_forever()
+
 
     loop = asyncio.get_event_loop()
     loop.create_task(main())
