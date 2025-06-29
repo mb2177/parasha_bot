@@ -8,21 +8,21 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from openai import AsyncOpenAI
 import asyncio
 
-# Загружаем токены из переменных окружения (работает и локально, и на Railway)
+# Загрузка токенов из переменных окружения
 TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 
 # Инициализация OpenAI клиента
 client = AsyncOpenAI(api_key=OPENAI_API_KEY)
 
-# Поддерживаемые языки
+# Языки
 LANGS = {
     "ru": "🇷🇺 Русский",
     "en": "🇬🇧 English",
     "he": "🇮🇱 עברית"
 }
 
-# Промпты для GPT
+# Промпты
 PROMPTS = {
     "summary": {
         "ru": "Кратко перескажи недельную главу Торы на этой неделе. Просто, понятно и интересно. Начни с названия главы. В конце добавь комментарий на русском.",
@@ -51,6 +51,7 @@ GPT_SYSTEM_PROMPT = (
     "с уважением к недельной главе Торы. Твой стиль подходит для широкой аудитории, включая тех, кто не религиозен."
 )
 
+# Язык пользователей
 LANG_FILE = "user_langs.json"
 user_langs = {}
 if os.path.exists(LANG_FILE):
@@ -64,6 +65,7 @@ def save_langs():
 def get_lang(user_id):
     return user_langs.get(str(user_id), "ru")
 
+# Обращение к GPT
 async def gpt_respond(prompt_text):
     try:
         response = await client.chat.completions.create(
@@ -117,7 +119,7 @@ async def summary(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def full(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await handle_gpt(update, context, "full")
 
-# Массовая рассылка
+# Рассылка
 async def send_to_all(app, key):
     for user_id, lang in user_langs.items():
         prompt = PROMPTS[key][lang]
@@ -142,6 +144,7 @@ def schedule_jobs(app: Application):
     scheduler.add_job(lambda: asyncio.create_task(send_to_all(app, "toast")), "cron", day_of_week="fri", hour=16, minute=0)
     scheduler.start()
 
+# Основная функция
 async def main():
     app = Application.builder().token(TOKEN).build()
 
@@ -163,9 +166,4 @@ async def main():
 
 if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO)
-    try:
-        loop = asyncio.get_event_loop()
-        loop.create_task(main())
-        loop.run_forever()
-    except Exception as e:
-        logging.error(f"Fatal error: {e}")
+    asyncio.run(main())
