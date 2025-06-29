@@ -54,6 +54,7 @@ def get_lang(user_id):
 
 async def gpt_respond(prompt_text):
     try:
+        client = openai.AsyncOpenAI()
         response = await client.chat.completions.create(
             model="gpt-4",
             messages=[
