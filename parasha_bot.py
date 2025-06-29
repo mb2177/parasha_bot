@@ -8,39 +8,29 @@ from telegram.ext import Application, CommandHandler, CallbackQueryHandler, Cont
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from openai import AsyncOpenAI
 
-# Загрузка токенов из .env
+# === Загрузка токенов ===
 load_dotenv()
 TOKEN = os.getenv("BOT_TOKEN")
-client = AsyncOpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+OPENAI_KEY = os.getenv("OPENAI_API_KEY")
+client = AsyncOpenAI(api_key=OPENAI_KEY)
 
-# Доступные языки
+# === Языки ===
 LANGS = {
     "ru": "🇷🇺 Русский",
     "en": "🇬🇧 English",
     "he": "🇮🇱 עברית"
 }
 
-# Промпты для GPT
+# === Промпты ===
 PROMPTS = {
     "summary": {
-        "ru": "Кратко перескажи недельную главу Торы на этой неделе. Просто, понятно и интересно. Добавь название главы и внизу один мудрый комментарий от себя на русском.",
-        "en": "Briefly summarize this week's Torah portion. Make it simple, clear, and engaging. Include the portion name and a short reflection at the end.",
-        "he": "סכם בקצרה את פרשת השבוע. כתוב בצורה ברורה, מעניינת ונגישה. כלול את שם הפרשה ולמטה הערה קצרה."
+        "ru": "Кратко перескажи недельную главу Торы на этой неделе. В конце добавь короткий комментарий от себя на русском — что в этом важного.",
     },
     "full": {
-        "ru": "Расскажи подробно и понятно о недельной главе Торы на этой неделе. Добавь название главы и в конце мудрый комментарий от себя на русском.",
-        "en": "Tell the full story of this week's Torah portion in a clear and engaging way. Include the portion name and a wise reflection at the end.",
-        "he": "ספר את סיפור הפרשה בצורה מלאה, מעניינת וברורה. כלול את שם הפרשה ולבסוף הוסף מחשבה חכמה."
-    },
-    "questions": {
-        "ru": "Какие жизненные уроки можно извлечь из недельной главы Торы? Задай 1-2 вопроса, о которых стоит подумать.",
-        "en": "What life lessons can be learned from this week's Torah portion? Ask 1-2 questions to reflect on.",
-        "he": "אילו מסרים אפשר ללמוד מהפרשה? שאל 1-2 שאלות שמעוררות מחשבה."
+        "ru": "Подробно, но понятно расскажи о недельной главе Торы. В конце добавь комментарий от себя на русском — чему это учит нас сегодня.",
     },
     "toast": {
-        "ru": "Сделай короткий, но мудрый и лёгкий для рассказа тост на Шаббат, связанный с темой недельной главы.",
-        "en": "Write a short but wise and light Shabbat toast inspired by this week's Torah portion.",
-        "he": "כתוב לחיים קצר, חכם וקליל לשבת על פי פרשת השבוע."
+        "ru": "Напиши короткий шаббатний тост, связанный с недельной главой. Пусть он будет мудрым, но не тяжёлым, уместным для произнесения за столом.",
     }
 }
 
@@ -75,7 +65,7 @@ async def gpt_respond(prompt_text):
     except Exception as e:
         return f"[Ошибка GPT: {e}]"
 
-# Команды Telegram
+# === Команды Telegram ===
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     keyboard = [[InlineKeyboardButton(name, callback_data=code)] for code, name in LANGS.items()]
     await update.message.reply_text("Выберите язык / Choose language:", reply_markup=InlineKeyboardMarkup(keyboard))
@@ -96,7 +86,7 @@ async def button(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def handle_gpt(update: Update, context: ContextTypes.DEFAULT_TYPE, key: str):
     user_id = str(update.effective_user.id)
     lang = get_lang(user_id)
-    prompt = PROMPTS[key][lang]
+    prompt = PROMPTS[key].get(lang, PROMPTS[key]["ru"])
     text = await gpt_respond(prompt)
     await update.message.reply_text(text)
 
@@ -106,10 +96,13 @@ async def summary(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def full(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await handle_gpt(update, context, "full")
 
-# Рассылка по всем пользователям
+async def toast(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await handle_gpt(update, context, "toast")
+
+# === Рассылка по всем пользователям ===
 async def send_to_all(app, key):
     for user_id, lang in user_langs.items():
-        prompt = PROMPTS[key][lang]
+        prompt = PROMPTS[key].get(lang, PROMPTS[key]["ru"])
         text = await gpt_respond(prompt)
         try:
             await app.bot.send_message(chat_id=int(user_id), text=text)
@@ -120,7 +113,6 @@ scheduler = AsyncIOScheduler(timezone="Asia/Dubai")
 
 def schedule_jobs(app: Application):
     scheduler.add_job(lambda: send_to_all(app, "summary"), "cron", day_of_week="sun", hour=12, minute=20)
-    scheduler.add_job(lambda: send_to_all(app, "questions"), "cron", day_of_week="wed", hour=14, minute=0)
     scheduler.add_job(lambda: send_to_all(app, "toast"), "cron", day_of_week="fri", hour=16, minute=0)
     scheduler.start()
 
@@ -131,13 +123,15 @@ async def main():
     app.add_handler(CommandHandler("language", language))
     app.add_handler(CommandHandler("summary", summary))
     app.add_handler(CommandHandler("full", full))
+    app.add_handler(CommandHandler("toast", toast))
     app.add_handler(CallbackQueryHandler(button))
 
     await app.bot.set_my_commands([
-        ("start", "Приветствие и выбор языка"),
+        ("start", "Начать / Сменить язык"),
         ("language", "Сменить язык"),
-        ("summary", "📚 Глава кратко"),
-        ("full", "📜 Глава подробно")
+        ("summary", "📚 Кратко о главе"),
+        ("full", "📜 Полная глава"),
+        ("toast", "🍷 Тост на шаббат")
     ])
 
     schedule_jobs(app)
@@ -145,14 +139,5 @@ async def main():
 
 if __name__ == "__main__":
     import asyncio
-    import sys
     logging.basicConfig(level=logging.INFO)
-    try:
-        asyncio.run(main())
-    except RuntimeError as e:
-        if "event loop is already running" in str(e):
-            loop = asyncio.get_event_loop()
-            loop.create_task(main())
-            loop.run_forever()
-        else:
-            raise e
+    asyncio.run(main())
