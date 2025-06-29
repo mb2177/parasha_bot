@@ -6,12 +6,12 @@ from dotenv import load_dotenv
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, CallbackQueryHandler, ContextTypes
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
-from openai import AsyncOpenAI
+import openai
 
 # Загрузка токенов из .env
 load_dotenv()
 TOKEN = os.getenv("BOT_TOKEN")
-openai_client = AsyncOpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+openai.api_key = os.getenv("OPENAI_API_KEY")
 
 # Доступные языки
 LANGS = {
@@ -64,7 +64,8 @@ def get_lang(user_id):
 
 async def gpt_respond(prompt_text):
     try:
-        response = await openai_client.chat.completions.create(
+        client = openai.AsyncOpenAI()
+        response = await client.chat.completions.create(
             model="gpt-4",
             messages=[
                 {"role": "system", "content": GPT_SYSTEM_PROMPT},
@@ -129,25 +130,23 @@ async def main():
 
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("language", language))
-    app.add_handler(CommandHandler("brief", summary))
-    app.add_handler(CommandHandler("deep", full))
+    app.add_handler(CommandHandler("summary", summary))
+    app.add_handler(CommandHandler("full", full))
     app.add_handler(CallbackQueryHandler(button))
 
     await app.bot.set_my_commands([
         ("start", "Приветствие и выбор языка"),
         ("language", "Сменить язык"),
-        ("brief", "📚 Краткий пересказ"),
-        ("deep", "📜 Подробный рассказ")
+        ("summary", "📚 Краткий пересказ главы"),
+        ("full", "📜 Полная версия главы")
     ])
 
     schedule_jobs(app)
-    await app.initialize()
-    await app.start()
-    await app.updater.start_polling()
-    await app.updater.idle()
+    await app.run_polling()
 
 if __name__ == "__main__":
     import asyncio
+    import sys
     logging.basicConfig(level=logging.INFO)
     try:
         asyncio.run(main())
