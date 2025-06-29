@@ -1,5 +1,3 @@
-# ✅ Финальная рабочая версия ParashaBot с поддержкой AsyncOpenAI и Railway Variables
-
 import os
 import json
 import logging
@@ -10,7 +8,7 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from openai import AsyncOpenAI
 import asyncio
 
-# Загружаем токены из переменных окружения (работает и локально, и на Railway)
+# Загружаем токены из переменных окружения
 TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 
@@ -48,10 +46,8 @@ PROMPTS = {
     }
 }
 
-GPT_SYSTEM_PROMPT = (
-    "Ты — еврейский наставник. Пиши в духе традиционного иудаизма: ясно, вдохновляюще и "
-    "с уважением к недельной главе Торы. Твой стиль подходит для широкой аудитории, включая тех, кто не религиозен."
-)
+GPT_SYSTEM_PROMPT = ("Ты — еврейский наставник. Пиши в духе традиционного иудаизма: ясно, вдохновляюще и "
+                     "с уважением к недельной главе Торы. Твой стиль подходит для широкой аудитории, включая тех, кто не религиозен.")
 
 LANG_FILE = "user_langs.json"
 user_langs = {}
@@ -119,7 +115,6 @@ async def summary(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def full(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await handle_gpt(update, context, "full")
 
-# Массовая рассылка
 async def send_to_all(app, key):
     for user_id, lang in user_langs.items():
         prompt = PROMPTS[key][lang]
@@ -139,10 +134,11 @@ async def send_to_all(app, key):
 scheduler = AsyncIOScheduler(timezone="Asia/Dubai")
 
 def schedule_jobs(app: Application):
-    scheduler.add_job(lambda: send_to_all(app, "summary"), "cron", day_of_week="sun", hour=12, minute=20)
-    scheduler.add_job(lambda: send_to_all(app, "questions"), "cron", day_of_week="wed", hour=14, minute=0)
-    scheduler.add_job(lambda: send_to_all(app, "toast"), "cron", day_of_week="fri", hour=16, minute=0)
-    scheduler.start()
+    if not scheduler.running:
+        scheduler.add_job(lambda: send_to_all(app, "summary"), "cron", day_of_week="sun", hour=12, minute=20)
+        scheduler.add_job(lambda: send_to_all(app, "questions"), "cron", day_of_week="wed", hour=14, minute=0)
+        scheduler.add_job(lambda: send_to_all(app, "toast"), "cron", day_of_week="fri", hour=16, minute=0)
+        scheduler.start()
 
 async def main():
     app = Application.builder().token(TOKEN).build()
@@ -164,20 +160,10 @@ async def main():
     await app.run_polling()
 
 if __name__ == "__main__":
-    import asyncio
-    import logging
-
     logging.basicConfig(level=logging.INFO)
-
     try:
         loop = asyncio.get_event_loop()
-        if loop.is_running():
-            # Railway или Jupyter — loop уже активен
-            loop.create_task(main())
-        else:
-            loop.run_until_complete(main())
-    except RuntimeError as e:
-        # Fallback, если loop ещё не создан
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-        loop.run_until_complete(main())
+        loop.create_task(main())
+        loop.run_forever()
+    except RuntimeError:
+        asyncio.run(main())
