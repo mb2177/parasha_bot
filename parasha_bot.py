@@ -1,211 +1,155 @@
-#!/usr/bin/env python3
 import os
-import logging
 import json
-import asyncio
-from datetime import datetime, time
-from zoneinfo import ZoneInfo
-from telegram import InlineKeyboardButton, InlineKeyboardMarkup, ReplyKeyboardMarkup, KeyboardButton, Update, BotCommand
-from telegram.ext import ApplicationBuilder, CommandHandler, CallbackQueryHandler, MessageHandler, filters, ContextTypes
-from openai import OpenAI
+import logging
+from datetime import datetime
+from dotenv import load_dotenv
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram.ext import Application, CommandHandler, CallbackQueryHandler, ContextTypes
+from apscheduler.schedulers.asyncio import AsyncIOScheduler
+import openai
 
-# Попытка применить nest_asyncio для избежания ошибок event loop в интерактивной среде
-try:
-    import nest_asyncio
-    nest_asyncio.apply()
-except ImportError:
-    pass
+# Загрузка токенов
+load_dotenv()
+TOKEN = os.getenv("BOT_TOKEN")
+openai.api_key = os.getenv("OPENAI_API_KEY")
 
-# -----------------------------------------------------------------------------
-# Конфигурация: ключи API Telegram и OpenAI жестко прописаны, как вы просили
-TELEGRAM_BOT_TOKEN = '7959503859:AAGaokGubdGPHRSivp6n11R7gNwuywX7Q-M'
-OPENAI_API_KEY     = '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'
-USER_LANG_FILE     = 'user_langs.json'
-MESSAGE_LOG_FILE   = 'message_logs.json'
-# -----------------------------------------------------------------------------
+# Языки
+LANGS = {
+    "ru": "🇷🇺 Русский",
+    "en": "🇬🇧 English",
+    "he": "🇮🇱 עברית"
+}
 
-# Логирование
-logging.basicConfig(format='%(asctime)s - %(levelname)s - %(message)s', level=logging.INFO)
-logger = logging.getLogger(__name__)
-
-# Инициализация OpenAI
-openai_client = OpenAI(api_key=OPENAI_API_KEY)
-
-# Память пользователей и лог сообщений
-user_langs   = {}
-message_logs = {}
-
-# --- Функции загрузки/сохранения данных ---
-def load_user_langs():
-    global user_langs
-    try:
-        with open(USER_LANG_FILE, 'r', encoding='utf-8') as f:
-            user_langs = json.load(f)
-    except FileNotFoundError:
-        user_langs = {}
-
-def save_user_langs():
-    with open(USER_LANG_FILE, 'w', encoding='utf-8') as f:
-        json.dump(user_langs, f, ensure_ascii=False, indent=2)
-
-def load_message_logs():
-    global message_logs
-    try:
-        with open(MESSAGE_LOG_FILE, 'r', encoding='utf-8') as f:
-            message_logs = json.load(f)
-    except FileNotFoundError:
-        message_logs = {}
-
-def save_message_logs():
-    with open(MESSAGE_LOG_FILE, 'w', encoding='utf-8') as f:
-        json.dump(message_logs, f, ensure_ascii=False, indent=2)
-
-def log_message(user_id: str, text: str, msg_type: str):
-    entry = {
-        'timestamp': datetime.now(ZoneInfo('Asia/Dubai')).isoformat(),
-        'type': msg_type,
-        'text': text
-    }
-    message_logs.setdefault(user_id, []).append(entry)
-    save_message_logs()
-
-# --- Локализованные тексты интерфейса ---
-TEXTS = {
-    'ru': {
-        'language_prompt': 'Выберите язык:',
-        'language_set'   : 'Язык установлен: {label}',
-        'menu'           : 'Выберите действие:',
-        'summary_prefix' : '📖 Кратко про главу:\n',
-        'full_prefix'    : '📜 Полная глава:\n',
-        'error'          : '⚠️ Произошла ошибка. Попробуйте позже.'
+# Промпты на каждом языке
+PROMPTS = {
+    "summary": {
+        "ru": "Кратко перескажи недельную главу Торы на этой неделе. Просто, понятно и интересно.",
+        "en": "Briefly summarize this week's Torah portion in a simple, clear, and engaging way.",
+        "he": "סכם בקצרה את פרשת השבוע בצורה פשוטה וברורה."
     },
-    'en': {
-        'language_prompt': 'Choose your language:',
-        'language_set'   : 'Language set to: {label}',
-        'menu'           : 'Choose an action:',
-        'summary_prefix' : '📖 Briefly Parshah:\n',
-        'full_prefix'    : '📜 Full Parshah:\n',
-        'error'          : '⚠️ An error occurred. Please try again later.'
+    "full": {
+        "ru": "Расскажи подробно, но понятно о недельной главе Торы этой недели.",
+        "en": "Tell the full story of this week's Torah portion in a clear and engaging way.",
+        "he": "ספר את סיפור הפרשה בצורה מלאה וברורה."
     },
-    'he': {
-        'language_prompt': 'בחר שפה:',
-        'language_set'   : 'השפה הוגדרה ל: {label}',
-        'menu'           : 'בחר פעולה:',
-        'summary_prefix' : '📖 תקציר פרשה:\n',
-        'full_prefix'    : '📜 הפרשה המלאה:\n',
-        'error'          : '⚠️ אירעה שגיאה. אנא נסה שוב מאוחר יותר.'
+    "questions": {
+        "ru": "Какие жизненные уроки можно извлечь из недельной главы Торы? Задай 1-2 вопроса, о которых стоит подумать.",
+        "en": "What life lessons can be learned from this week's Torah portion? Ask 1-2 questions to reflect on.",
+        "he": "אילו מסרים אפשר ללמוד מהפרשה? שאל 1-2 שאלות שמעוררות מחשבה."
+    },
+    "toast": {
+        "ru": "Сделай короткий тост на Шаббат, связанный с темой недельной главы.",
+        "en": "Write a short Shabbat toast inspired by this week's Torah portion.",
+        "he": "כתוב לחיים קצר לשבת על פי פרשת השבוע."
     }
 }
 
-LANG_LABELS = {'ru': '🇷🇺 Русский', 'en': '🇬🇧 English', 'he': '🇮🇱 עברית'}
+# Системная инструкция GPT
+GPT_SYSTEM_PROMPT = (
+    "Ты — еврейский наставник. Пиши в духе традиционного иудаизма: ясно, вдохновляюще и с уважением к недельной главе Торы. "
+    "Твой стиль подходит для широкой аудитории, включая тех, кто не религиозен."
+)
 
-def get_text(key: str, lang: str, **kwargs) -> str:
-    return TEXTS.get(lang, TEXTS['en'])[key].format(**kwargs)
+# Файл с языками пользователей
+LANG_FILE = "user_langs.json"
+user_langs = {}
 
-# --- Функции генерации через OpenAI ---
-async def generate_summary(lang: str) -> str:
-    sys_map = {
-        'ru': 'Ты эксперт по Торе, кратко перескажи текущую главу простым языком.',
-        'en': 'You are an expert on the Torah; give a simple summary of this week’s portion.',
-        'he': 'אתה מומחה לתורה; כתוב תקציר פשוט של הפרשה השבועית.'
-    }
-    prompt_map = {
-        'ru': 'Напиши простой краткий пересказ этой недельной главы Торы.',
-        'en': 'Write a simple summary of this week’s Torah portion.',
-        'he': 'כתוב תקציר קצר של הפרשה השבועית.'
-    }
-    resp = openai_client.chat.completions.create(
-        model='gpt-4o',
-        messages=[
-            {'role': 'system', 'content': sys_map.get(lang, sys_map['en'])},
-            {'role': 'user', 'content': prompt_map.get(lang, prompt_map['en'])}
-        ],
-        temperature=0.7,
-    )
-    return resp.choices[0].message.content.strip()
+if os.path.exists(LANG_FILE):
+    with open(LANG_FILE, encoding="utf-8") as f:
+        user_langs = json.load(f)
 
-async def generate_full_text(lang: str) -> str:
-    text_map = {
-        'ru': 'Предоставь полный текст недельной главы Торы на русском языке.',
-        'en': 'Provide the full text of this week’s Torah portion in English.',
-        'he': 'כתוב את הטקסט המלא של הפרשה השבועית בעברית.'
-    }
-    resp = openai_client.chat.completions.create(
-        model='gpt-4o',
-        messages=[
-            {'role': 'system', 'content': text_map.get(lang, text_map['en'])},
-            {'role': 'user', 'content': text_map.get(lang, text_map['en'])}
-        ],
-        temperature=0.5,
-        max_tokens=4096,
-    )
-    return resp.choices[0].message.content.strip()
+def save_langs():
+    with open(LANG_FILE, "w", encoding="utf-8") as f:
+        json.dump(user_langs, f, ensure_ascii=False, indent=2)
 
-# --- Обработчики команд и кнопок ---
+def get_lang(user_id):
+    return user_langs.get(str(user_id), "ru")
+
+# GPT-запрос
+async def gpt_respond(prompt_text):
+    try:
+        response = await openai.ChatCompletion.acreate(
+            model="gpt-4",
+            messages=[
+                {"role": "system", "content": GPT_SYSTEM_PROMPT},
+                {"role": "user", "content": prompt_text}
+            ]
+        )
+        return response.choices[0].message.content.strip()
+    except Exception as e:
+        return f"[Ошибка GPT: {e}]"
+
+# Команды
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    keyboard = [
-        [InlineKeyboardButton(LANG_LABELS['ru'], callback_data='lang|ru')],
-        [InlineKeyboardButton(LANG_LABELS['en'], callback_data='lang|en')],
-        [InlineKeyboardButton(LANG_LABELS['he'], callback_data='lang|he')]
-    ]
-    await update.message.reply_text(
-        get_text('language_prompt', 'en'),
-        reply_markup=InlineKeyboardMarkup(keyboard)
-    )
+    keyboard = [[InlineKeyboardButton(name, callback_data=code)] for code, name in LANGS.items()]
+    await update.message.reply_text("Выберите язык / Choose language:", reply_markup=InlineKeyboardMarkup(keyboard))
 
-async def lang_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def language(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    keyboard = [[InlineKeyboardButton(name, callback_data=code)] for code, name in LANGS.items()]
+    await update.message.reply_text("Сменить язык / Change language:", reply_markup=InlineKeyboardMarkup(keyboard))
+
+async def button(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
-    lang = query.data.split('|', 1)[1]
+    lang = query.data
     user_id = str(query.from_user.id)
     user_langs[user_id] = lang
-    save_user_langs()
+    save_langs()
+    await query.edit_message_text(f"Язык установлен: {LANGS[lang]}")
 
-    await query.edit_message_text(get_text('language_set', lang, label=LANG_LABELS[lang]))
-    menu_buttons = [[KeyboardButton("📚 Кратко про главу"), KeyboardButton("📜 Полная глава")],[KeyboardButton("/language")]]
-    await context.bot.send_message(chat_id=query.from_user.id, text=get_text('menu', lang), reply_markup=ReplyKeyboardMarkup(menu_buttons, resize_keyboard=True))
+# Обработка запросов
+async def handle_gpt(update: Update, context: ContextTypes.DEFAULT_TYPE, key: str):
+    user_id = str(update.effective_user.id)
+    lang = get_lang(user_id)
+    prompt = PROMPTS[key][lang]
+    text = await gpt_respond(prompt)
+    await update.message.reply_text(text)
 
-async def brief_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_id, lang = str(update.effective_user.id), user_langs.get(str(update.effective_user.id), 'en')
-    try:
-        text = get_text('summary_prefix', lang) + (await generate_summary(lang))
-        await update.message.reply_text(text)
-        log_message(user_id, text, 'manual')
-    except Exception as e:
-        logger.error(f"Error in brief_handler: {e}")
-        await update.message.reply_text(get_text('error', lang))
+async def summary(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await handle_gpt(update, context, "summary")
 
-async def full_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_id, lang = str(update.effective_user.id), user_langs.get(str(update.effective_user.id), 'en')
-    try:
-        full = await generate_full_text(lang)
-        prefix = get_text('full_prefix', lang)
-        for i in range(0, len(full), 4000): await update.message.reply_text((prefix if i==0 else '') + full[i:i+4000])
-        if len(full) > 4000: await update.message.reply_text('✅ Текст был длинным и разбит')
-        log_message(user_id, prefix + full, 'manual')
-    except Exception as e:
-        logger.error(f"Error in full_handler: {e}")
-        await update.message.reply_text(get_text('error', lang))
+async def full(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await handle_gpt(update, context, "full")
 
-async def broadcast_summary(context: ContextTypes.DEFAULT_TYPE):
-    for uid, lang in user_langs.items():
+# Планировщик
+async def send_to_all(app, key):
+    for user_id, lang in user_langs.items():
+        prompt = PROMPTS[key][lang]
+        text = await gpt_respond(prompt)
         try:
-            text = get_text('summary_prefix', lang) + (await generate_summary(lang))
-            await context.bot.send_message(chat_id=int(uid), text=text)
-            log_message(uid, text, 'auto')
+            await app.bot.send_message(chat_id=int(user_id), text=text)
         except Exception as e:
-            logger.error(f"Broadcast error for {uid}: {e}")
+            logging.warning(f"Ошибка отправки {key} пользователю {user_id}: {e}")
 
-def schedule_jobs(job_queue): job_queue.run_daily(broadcast_summary, time=time(12,20, tzinfo=ZoneInfo('Asia/Dubai')))
+scheduler = AsyncIOScheduler(timezone="Asia/Dubai")
 
+def schedule_jobs(app: Application):
+    scheduler.add_job(lambda: send_to_all(app, "summary"), "cron", day_of_week="sun", hour=12, minute=20)
+    scheduler.add_job(lambda: send_to_all(app, "questions"), "cron", day_of_week="wed", hour=14, minute=0)
+    scheduler.add_job(lambda: send_to_all(app, "toast"), "cron", day_of_week="fri", hour=16, minute=0)
+    scheduler.start()
+
+# Запуск
 async def main():
-    load_user_langs(); load_message_logs()
-    app = ApplicationBuilder().token(TELEGRAM_BOT_TOKEN).post_init(lambda a: a.bot.set_my_commands([BotCommand('start','Start'),BotCommand('language','Change language'),BotCommand('brief','Briefly'),BotCommand('full','Full')])).build()
-    app.add_handler(CommandHandler('start', start)); app.add_handler(CommandHandler('language', start))
-    app.add_handler(CallbackQueryHandler(lang_callback, pattern=r'^lang\|'))
-    app.add_handler(CommandHandler('brief', brief_handler)); app.add_handler(CommandHandler('full', full_handler))
-    app.add_handler(MessageHandler(filters.TEXT("📚 Кратко про главу"), brief_handler)); app.add_handler(MessageHandler(filters.TEXT("📜 Полная глава"), full_handler))
-    schedule_jobs(app.job_queue)
+    app = Application.builder().token(TOKEN).build()
+
+    app.add_handler(CommandHandler("start", start))
+    app.add_handler(CommandHandler("language", language))
+    app.add_handler(CommandHandler("summary", summary))
+    app.add_handler(CommandHandler("full", full))
+    app.add_handler(CallbackQueryHandler(button))
+
+    app.bot.set_my_commands([
+        ("start", "Приветствие и выбор языка"),
+        ("language", "Сменить язык"),
+        ("summary", "📚 Кратко про главу"),
+        ("full", "📜 Полная глава")
+    ])
+
+    schedule_jobs(app)
     await app.run_polling()
 
-if __name__ == '__main__': asyncio.run(main())
+if __name__ == "__main__":
+    import asyncio
+    logging.basicConfig(level=logging.INFO)
+    asyncio.run(main())
