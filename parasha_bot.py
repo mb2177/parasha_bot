@@ -164,16 +164,20 @@ async def main():
     await app.run_polling()
 
 if __name__ == "__main__":
-    logging.basicConfig(level=logging.INFO)
     import asyncio
+    import logging
+
+    logging.basicConfig(level=logging.INFO)
 
     try:
-        asyncio.run(main())
-    except RuntimeError as e:
-        if "event loop is already running" in str(e):
-            # Для совместимости с Railway/Nix
-            loop = asyncio.get_event_loop()
+        loop = asyncio.get_event_loop()
+        if loop.is_running():
+            # Railway или Jupyter — loop уже активен
             loop.create_task(main())
-            loop.run_forever()
         else:
-            raise e
+            loop.run_until_complete(main())
+    except RuntimeError as e:
+        # Fallback, если loop ещё не создан
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        loop.run_until_complete(main())
