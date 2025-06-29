@@ -14,6 +14,9 @@ load_dotenv()
 TOKEN = os.getenv("BOT_TOKEN")
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 
+# GPT-клиент
+client = AsyncOpenAI(api_key=OPENAI_API_KEY)
+
 # Доступные языки
 LANGS = {
     "ru": "🇷🇺 Русский",
@@ -46,7 +49,8 @@ PROMPTS = {
 }
 
 GPT_SYSTEM_PROMPT = (
-    "You are a Jewish mentor. Respond clearly, inspirationally, and with respect for Torah tradition."
+     "Ты — еврейский наставник. Пиши в духе традиционного иудаизма: ясно, вдохновляюще и с уважением к недельной главе Торы. "
+    "Твой стиль подходит для широкой аудитории, включая тех, кто не религиозен."
 )
 
 LANG_FILE = "user_langs.json"
@@ -62,8 +66,7 @@ def save_langs():
 def get_lang(user_id):
     return user_langs.get(str(user_id), "ru")
 
-# GPT via openai>=1.0.0
-client = AsyncOpenAI(api_key=OPENAI_API_KEY)
+# GPT-ответ
 async def gpt_respond(prompt_text):
     try:
         response = await client.chat.completions.create(
@@ -117,7 +120,7 @@ async def summary(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def full(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await handle_gpt(update, context, "full")
 
-# Mass sending with inline buttons
+# Массовая рассылка
 async def send_to_all(app, key):
     for user_id, lang in user_langs.items():
         prompt = PROMPTS[key][lang]
@@ -125,8 +128,8 @@ async def send_to_all(app, key):
         try:
             if key == "summary":
                 keyboard = InlineKeyboardMarkup([
-                    [InlineKeyboardButton("\ud83d\udcdc Подробное описание", callback_data=f"full_{user_id}")],
-                    [InlineKeyboardButton("\u2705 Достаточно понятно", callback_data="enough")]
+                    [InlineKeyboardButton("📄 Подробное описание", callback_data=f"full_{user_id}")],
+                    [InlineKeyboardButton("✅ Достаточно понятно", callback_data="enough")]
                 ])
                 await app.bot.send_message(chat_id=int(user_id), text=text, reply_markup=keyboard)
             else:
@@ -134,6 +137,7 @@ async def send_to_all(app, key):
         except Exception as e:
             logging.warning(f"Ошибка отправки {key} пользователю {user_id}: {e}")
 
+# Планировщик
 scheduler = AsyncIOScheduler(timezone="Asia/Dubai")
 
 def schedule_jobs(app: Application):
@@ -142,6 +146,7 @@ def schedule_jobs(app: Application):
     scheduler.add_job(lambda: send_to_all(app, "toast"), "cron", day_of_week="fri", hour=16, minute=0)
     scheduler.start()
 
+# Запуск бота
 async def main():
     app = Application.builder().token(TOKEN).build()
 
@@ -154,15 +159,14 @@ async def main():
     await app.bot.set_my_commands([
         ("start", "Приветствие и выбор языка"),
         ("language", "Сменить язык"),
-        ("summary", "\ud83d\udcda Краткий пересказ главы"),
-        ("full", "\ud83d\udcdc Полная глава с пояснением")
+        ("summary", "📚 Краткий пересказ главы"),
+        ("full", "📄 Полная глава с пояснением")
     ])
 
     schedule_jobs(app)
     await app.run_polling()
 
 if __name__ == "__main__":
-    import sys
     logging.basicConfig(level=logging.INFO)
     try:
         asyncio.run(main())
