@@ -9,9 +9,7 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from openai import AsyncOpenAI
 import asyncio
 
-# Загрузка токенов из .env
-load_dotenv()
-TOKEN = os.getenv("BOT_TOKEN")
+TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 
 # GPT-клиент
