@@ -120,12 +120,11 @@ def schedule_jobs(app: Application):
     scheduler.start()
 
 import asyncio
-import logging
 
 if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO)
 
-    async def run():
+    async def main():
         app = Application.builder().token(TOKEN).build()
 
         app.add_handler(CommandHandler("start", start))
@@ -141,18 +140,10 @@ if __name__ == "__main__":
             ("full", "📜 Полная глава")
         ])
 
-        schedule_jobs(app)
         await app.initialize()
+        schedule_jobs(app)
         await app.start()
         await app.updater.start_polling()
         await asyncio.Event().wait()
 
-    try:
-        asyncio.run(run())
-    except RuntimeError as e:
-        if "event loop is already running" in str(e):
-            loop = asyncio.get_event_loop()
-            loop.create_task(run())
-            loop.run_forever()
-        else:
-            raise
+    asyncio.run(main())
