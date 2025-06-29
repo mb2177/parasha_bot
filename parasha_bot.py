@@ -164,6 +164,15 @@ async def main():
     schedule_jobs(app)
     await app.run_polling()
 
-if __name__ == "__main__":
+ if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO)
-    asyncio.run(main())
+
+    try:
+        import uvloop
+        asyncio.set_event_loop_policy(uvloop.EventLoopPolicy())
+    except ImportError:
+        pass
+
+    loop = asyncio.get_event_loop()
+    loop.create_task(main())
+    loop.run_forever()
