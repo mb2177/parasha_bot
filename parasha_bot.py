@@ -8,19 +8,19 @@ from telegram.ext import Application, CommandHandler, CallbackQueryHandler, Cont
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 import openai
 
-# Загрузка токенов
+# Загрузка токенов из .env
 load_dotenv()
 TOKEN = os.getenv("BOT_TOKEN")
 openai.api_key = os.getenv("OPENAI_API_KEY")
 
-# Языки
+# Доступные языки
 LANGS = {
     "ru": "🇷🇺 Русский",
     "en": "🇬🇧 English",
     "he": "🇮🇱 עברית"
 }
 
-# Промпты на каждом языке
+# Промпты для GPT
 PROMPTS = {
     "summary": {
         "ru": "Кратко перескажи недельную главу Торы на этой неделе. Просто, понятно и интересно.",
@@ -44,16 +44,13 @@ PROMPTS = {
     }
 }
 
-# Системная инструкция GPT
 GPT_SYSTEM_PROMPT = (
     "Ты — еврейский наставник. Пиши в духе традиционного иудаизма: ясно, вдохновляюще и с уважением к недельной главе Торы. "
     "Твой стиль подходит для широкой аудитории, включая тех, кто не религиозен."
 )
 
-# Файл с языками пользователей
 LANG_FILE = "user_langs.json"
 user_langs = {}
-
 if os.path.exists(LANG_FILE):
     with open(LANG_FILE, encoding="utf-8") as f:
         user_langs = json.load(f)
@@ -65,7 +62,6 @@ def save_langs():
 def get_lang(user_id):
     return user_langs.get(str(user_id), "ru")
 
-# GPT-запрос
 async def gpt_respond(prompt_text):
     try:
         response = await openai.ChatCompletion.acreate(
@@ -79,7 +75,7 @@ async def gpt_respond(prompt_text):
     except Exception as e:
         return f"[Ошибка GPT: {e}]"
 
-# Команды
+# Команды Telegram
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     keyboard = [[InlineKeyboardButton(name, callback_data=code)] for code, name in LANGS.items()]
     await update.message.reply_text("Выберите язык / Choose language:", reply_markup=InlineKeyboardMarkup(keyboard))
@@ -97,7 +93,6 @@ async def button(update: Update, context: ContextTypes.DEFAULT_TYPE):
     save_langs()
     await query.edit_message_text(f"Язык установлен: {LANGS[lang]}")
 
-# Обработка запросов
 async def handle_gpt(update: Update, context: ContextTypes.DEFAULT_TYPE, key: str):
     user_id = str(update.effective_user.id)
     lang = get_lang(user_id)
@@ -111,7 +106,7 @@ async def summary(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def full(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await handle_gpt(update, context, "full")
 
-# Планировщик
+# Рассылка по всем пользователям
 async def send_to_all(app, key):
     for user_id, lang in user_langs.items():
         prompt = PROMPTS[key][lang]
@@ -129,7 +124,6 @@ def schedule_jobs(app: Application):
     scheduler.add_job(lambda: send_to_all(app, "toast"), "cron", day_of_week="fri", hour=16, minute=0)
     scheduler.start()
 
-# Запуск
 async def main():
     app = Application.builder().token(TOKEN).build()
 
@@ -139,7 +133,7 @@ async def main():
     app.add_handler(CommandHandler("full", full))
     app.add_handler(CallbackQueryHandler(button))
 
-    app.bot.set_my_commands([
+    await app.bot.set_my_commands([
         ("start", "Приветствие и выбор языка"),
         ("language", "Сменить язык"),
         ("summary", "📚 Кратко про главу"),
@@ -151,7 +145,15 @@ async def main():
 
 if __name__ == "__main__":
     import asyncio
+    import sys
     logging.basicConfig(level=logging.INFO)
-    loop = asyncio.get_event_loop()
-    loop.create_task(main())
-    loop.run_forever()
+    try:
+        asyncio.run(main())
+    except RuntimeError as e:
+        if "event loop is already running" in str(e):
+            loop = asyncio.get_event_loop()
+            loop.create_task(main())
+            loop.run_forever()
+        else:
+            raise e
+            
