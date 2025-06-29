@@ -1,21 +1,23 @@
+# ✅ Финальная рабочая версия ParashaBot с поддержкой AsyncOpenAI и Railway Variables
+
 import os
 import json
 import logging
 from datetime import datetime
-from dotenv import load_dotenv
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, CallbackQueryHandler, ContextTypes
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from openai import AsyncOpenAI
 import asyncio
 
+# Загружаем токены из переменных окружения (работает и локально, и на Railway)
 TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 
-# GPT-клиент
+# Инициализация OpenAI клиента
 client = AsyncOpenAI(api_key=OPENAI_API_KEY)
 
-# Доступные языки
+# Поддерживаемые языки
 LANGS = {
     "ru": "🇷🇺 Русский",
     "en": "🇬🇧 English",
@@ -27,17 +29,17 @@ PROMPTS = {
     "summary": {
         "ru": "Кратко перескажи недельную главу Торы на этой неделе. Просто, понятно и интересно. Начни с названия главы. В конце добавь комментарий на русском.",
         "en": "Briefly summarize this week's Torah portion in a simple, clear, and engaging way. Add a short comment in English at the end.",
-        "he": "סכם בקצרה את פרשת השבוע בצורה פשוטה וברורה. הוסף תגובה קצרה בסוף."
+        "he": "סכם בקצרה את פרשת השבוע בצורה פשוטה וברורה. הוסף תגובה קצרה לסוף."
     },
     "full": {
         "ru": "Расскажи подробно, но понятно о недельной главе Торы этой недели. Начни с названия главы. В конце добавь комментарий на русском.",
         "en": "Tell the full story of this week's Torah portion in a clear and engaging way. Start with the parashah name. End with a short English comment.",
-        "he": "ספר את סיפור הפרשה בצורה מלאה וברורה. התחל בשם הפרשה. סיים בתגובה קצרה בסוף."
+        "he": "ספר את סיפור הפרשה בצורה מלאה וברורה. התחל בשם הפרשה. סיים בתגובה קצרה."
     },
     "questions": {
         "ru": "Какие жизненные уроки можно извлечь из недельной главы Торы? Задай 1-2 вопроса, о которых стоит подумать.",
         "en": "What life lessons can be learned from this week's Torah portion? Ask 1-2 questions to reflect on.",
-        "he": "אילו מסרים אפשר ללמוד מהפרשה? שאל 1-2 שאלות שמעוררות מחשב.",
+        "he": "אילו מסרים אפשר ללמד מהפרשה? שאל 1-2 שאלות שמעוררות מחשב."
     },
     "toast": {
         "ru": "Сделай короткий, мудрый, но не тяжёлый тост на Шаббат, связанный с темой недельной главы.",
@@ -46,10 +48,8 @@ PROMPTS = {
     }
 }
 
-GPT_SYSTEM_PROMPT = (
-     "Ты — еврейский наставник. Пиши в духе традиционного иудаизма: ясно, вдохновляюще и с уважением к недельной главе Торы. "
+GPT_SYSTEM_PROMPT = "Ты — еврейский наставник. Пиши в духе традиционного иудаизма: ясно, вдохновляюще и с уважением к недельной главе Торы. "
     "Твой стиль подходит для широкой аудитории, включая тех, кто не религиозен."
-)
 
 LANG_FILE = "user_langs.json"
 user_langs = {}
@@ -64,7 +64,6 @@ def save_langs():
 def get_lang(user_id):
     return user_langs.get(str(user_id), "ru")
 
-# GPT-ответ
 async def gpt_respond(prompt_text):
     try:
         response = await client.chat.completions.create(
@@ -135,7 +134,6 @@ async def send_to_all(app, key):
         except Exception as e:
             logging.warning(f"Ошибка отправки {key} пользователю {user_id}: {e}")
 
-# Планировщик
 scheduler = AsyncIOScheduler(timezone="Asia/Dubai")
 
 def schedule_jobs(app: Application):
@@ -144,7 +142,6 @@ def schedule_jobs(app: Application):
     scheduler.add_job(lambda: send_to_all(app, "toast"), "cron", day_of_week="fri", hour=16, minute=0)
     scheduler.start()
 
-# Запуск бота
 async def main():
     app = Application.builder().token(TOKEN).build()
 
