@@ -1,23 +1,26 @@
 import os
 import json
 import logging
+from datetime import datetime
 from dotenv import load_dotenv
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, CallbackQueryHandler, ContextTypes
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
-import openai
+from openai import AsyncOpenAI
 
-# Загрузка переменных окружения
+# Загрузка токенов из .env
 load_dotenv()
 TOKEN = os.getenv("BOT_TOKEN")
-openai.api_key = os.getenv("OPENAI_API_KEY")
+openai_client = AsyncOpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
+# Доступные языки
 LANGS = {
     "ru": "🇷🇺 Русский",
     "en": "🇬🇧 English",
     "he": "🇮🇱 עברית"
 }
 
+# Промпты для GPT
 PROMPTS = {
     "summary": {
         "ru": "Кратко перескажи недельную главу Торы на этой неделе. Просто, понятно и интересно.",
@@ -61,7 +64,7 @@ def get_lang(user_id):
 
 async def gpt_respond(prompt_text):
     try:
-        response = await openai.ChatCompletion.acreate(
+        response = await openai_client.chat.completions.create(
             model="gpt-4",
             messages=[
                 {"role": "system", "content": GPT_SYSTEM_PROMPT},
@@ -72,6 +75,7 @@ async def gpt_respond(prompt_text):
     except Exception as e:
         return f"[Ошибка GPT: {e}]"
 
+# Команды Telegram
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     keyboard = [[InlineKeyboardButton(name, callback_data=code)] for code, name in LANGS.items()]
     await update.message.reply_text("Выберите язык / Choose language:", reply_markup=InlineKeyboardMarkup(keyboard))
@@ -102,6 +106,7 @@ async def summary(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def full(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await handle_gpt(update, context, "full")
 
+# Рассылка по всем пользователям
 async def send_to_all(app, key):
     for user_id, lang in user_langs.items():
         prompt = PROMPTS[key][lang]
@@ -119,31 +124,37 @@ def schedule_jobs(app: Application):
     scheduler.add_job(lambda: send_to_all(app, "toast"), "cron", day_of_week="fri", hour=16, minute=0)
     scheduler.start()
 
-import asyncio
+async def main():
+    app = Application.builder().token(TOKEN).build()
+
+    app.add_handler(CommandHandler("start", start))
+    app.add_handler(CommandHandler("language", language))
+    app.add_handler(CommandHandler("brief", summary))
+    app.add_handler(CommandHandler("deep", full))
+    app.add_handler(CallbackQueryHandler(button))
+
+    await app.bot.set_my_commands([
+        ("start", "Приветствие и выбор языка"),
+        ("language", "Сменить язык"),
+        ("brief", "📚 Краткий пересказ"),
+        ("deep", "📜 Подробный рассказ")
+    ])
+
+    schedule_jobs(app)
+    await app.initialize()
+    await app.start()
+    await app.updater.start_polling()
+    await app.updater.idle()
 
 if __name__ == "__main__":
+    import asyncio
     logging.basicConfig(level=logging.INFO)
-
-    async def main():
-        app = Application.builder().token(TOKEN).build()
-
-        app.add_handler(CommandHandler("start", start))
-        app.add_handler(CommandHandler("language", language))
-        app.add_handler(CommandHandler("summary", summary))
-        app.add_handler(CommandHandler("full", full))
-        app.add_handler(CallbackQueryHandler(button))
-
-        await app.bot.set_my_commands([
-            ("start", "Приветствие и выбор языка"),
-            ("language", "Сменить язык"),
-            ("summary", "📚 Кратко про главу"),
-            ("full", "📜 Полная глава")
-        ])
-
-        await app.initialize()
-        schedule_jobs(app)
-        await app.start()
-        await app.updater.start_polling()
-        await asyncio.Event().wait()
-
-    asyncio.run(main())
+    try:
+        asyncio.run(main())
+    except RuntimeError as e:
+        if "event loop is already running" in str(e):
+            loop = asyncio.get_event_loop()
+            loop.create_task(main())
+            loop.run_forever()
+        else:
+            raise e
